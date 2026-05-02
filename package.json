@@ -1,0 +1,39 @@
+{
+  "name": "freshjots",
+  "version": "0.1.0",
+  "description": "Tiny JavaScript client for the Fresh Jots API. Append-only notebooks for cron jobs, deploy scripts, and bots.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "keywords": [
+    "freshjots",
+    "notes",
+    "api",
+    "cli",
+    "cron",
+    "logging"
+  ],
+  "author": "Goran Arsov <arsphy@yahoo.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/Goran-Arsov/freshjots-js#readme",
+  "bugs": {
+    "url": "https://github.com/Goran-Arsov/freshjots-js/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Goran-Arsov/freshjots-js.git"
+  }
+}
