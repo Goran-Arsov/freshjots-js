@@ -19,16 +19,16 @@ test("Client throws when no token is available", () => {
 });
 
 test("Client accepts an explicit token", () => {
-  const c = new Client({ token: "fjk_test" });
-  assert.equal(c.token, "fjk_test");
+  const c = new Client({ token: "mn_test" });
+  assert.equal(c.token, "mn_test");
 });
 
 test("Client reads the token from FRESHJOTS_TOKEN", () => {
   const previous = process.env.FRESHJOTS_TOKEN;
-  process.env.FRESHJOTS_TOKEN = "fjk_env";
+  process.env.FRESHJOTS_TOKEN = "mn_env";
   try {
     const c = new Client();
-    assert.equal(c.token, "fjk_env");
+    assert.equal(c.token, "mn_env");
   } finally {
     if (previous === undefined) delete process.env.FRESHJOTS_TOKEN;
     else process.env.FRESHJOTS_TOKEN = previous;
