@@ -1,14 +1,19 @@
 {
   "name": "freshjots",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Tiny JavaScript client for the Fresh Jots API. Append-only notebooks for cron jobs, deploy scripts, and bots.",
   "type": "module",
   "main": "index.js",
+  "types": "./index.d.ts",
   "exports": {
-    ".": "./index.js"
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
   },
   "files": [
     "index.js",
+    "index.d.ts",
     "README.md",
     "LICENSE"
   ],
@@ -16,7 +21,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test"
   },
   "keywords": [
     "freshjots",

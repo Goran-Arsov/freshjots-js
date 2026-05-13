@@ -37,6 +37,30 @@ await client.create({ filename: "research-2026-q2", body: "Initial outline." });
 The whole API is four methods: `notes()`, `note(filename)`,
 `create({ filename, body, title })`, `append(filename, text)`.
 
+## TypeScript
+
+Types ship with the package — no `@types/freshjots` needed, no `.d.ts`
+to hand-write. Just import the typed surface:
+
+```ts
+import { Client, ApiError, type Note, type ApiErrorCode } from "freshjots";
+
+const client = new Client();
+const note: Note = await client.note("cron-jobs-prod");
+//        ^? Note — full editor autocomplete on plain_body, byte_size, etc.
+
+try {
+  await client.append("log", "ok");
+} catch (e) {
+  if (e instanceof ApiError) {
+    const code: ApiErrorCode = e.code; // narrowed union; exhaustive switches work
+  }
+}
+```
+
+Requires TypeScript 4.5 or later (anything that understands the `"types"`
+field in `package.json`'s `"exports"` map).
+
 ## Errors
 
 Any non-2xx response throws `ApiError` with `status`, `code`, `message`,
@@ -74,7 +98,7 @@ export FRESHJOTS_TOKEN=<your-token>
 Or pass explicitly:
 
 ```js
-new Client({ token: "fjk_…" })
+new Client({ token: "mn_…" })
 ```
 
 ## Requirements
