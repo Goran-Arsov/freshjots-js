@@ -61,10 +61,14 @@ declare module "freshjots" {
     baseUrl?: string;
   }
 
+  /**
+   * Input for `create()`. The API derives the note's filename from the
+   * title (it does not accept a client-supplied filename). For a note
+   * addressable by an exact, caller-chosen filename, use `append()`.
+   */
   export interface CreateInput {
-    filename: string;
+    title: string;
     body?: string;
-    title?: string;
   }
 
   export class Client {

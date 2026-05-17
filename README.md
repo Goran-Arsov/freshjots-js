@@ -30,12 +30,16 @@ console.log(note.plain_body);
 const notes = await client.notes();
 for (const n of notes) console.log(`${n.filename}\t${n.title}`);
 
-// Create a new note explicitly (errors if the filename is taken).
-await client.create({ filename: "research-2026-q2", body: "Initial outline." });
+// Create a note. The API derives the filename from the title — for a
+// note addressable by an exact filename, use append() instead.
+const created = await client.create({ title: "Research 2026 Q2", body: "Initial outline." });
+console.log(created.filename); // server-derived stream name
 ```
 
 The whole API is four methods: `notes()`, `note(filename)`,
-`create({ filename, body, title })`, `append(filename, text)`.
+`create({ title, body })`, `append(filename, text)`. `note()` and
+`create()` return the note object directly (no `{ note: … }` wrapper);
+`notes()` returns the array.
 
 ## TypeScript
 
