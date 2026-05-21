@@ -41,6 +41,47 @@ The whole API is four methods: `notes()`, `note(filename)`,
 `create()` return the note object directly (no `{ note: … }` wrapper);
 `notes()` returns the array.
 
+## CLI
+
+Installing the package globally puts a `freshjots` command on your
+PATH, so you can read and write notes straight from a terminal without
+writing any JavaScript. This works in bash, zsh, fish, Windows
+PowerShell, and CMD — npm generates a `.cmd` shim on Windows
+automatically.
+
+```sh
+npm install -g freshjots
+export FRESHJOTS_TOKEN=mn_…           # PowerShell: $env:FRESHJOTS_TOKEN = "mn_…"
+```
+
+The CLI mirrors the four API methods one-for-one:
+
+```sh
+freshjots list                            # prints "<filename>\t<title>" per row
+freshjots show cron-jobs-prod             # prints the note's plain_body
+freshjots create "Research 2026 Q2"       # body comes from stdin or --body
+freshjots append cron-jobs-prod "ok"      # text may also be piped on stdin
+```
+
+Both `create` and `append` read from stdin when the body or text isn't
+passed as an argument, so the usual pipe patterns work:
+
+```sh
+backup.sh && echo "backup ok $(date -Iseconds)" | freshjots append cron-jobs-prod
+git log -1 --pretty=format:"%h %s" | freshjots append deploys
+```
+
+The same patterns work in PowerShell:
+
+```powershell
+"backup ok $(Get-Date -Format o)" | freshjots append cron-jobs-prod
+freshjots create "Deploy log" --body "Initial entry."
+```
+
+Exit codes: `0` on success, `1` on runtime errors (missing token,
+network failure, non-2xx API response — printed as `Error: HTTP <status>
+<code>: <message>`), `2` on usage errors.
+
 ## TypeScript
 
 Types ship with the package — no `@types/freshjots` needed, no `.d.ts`

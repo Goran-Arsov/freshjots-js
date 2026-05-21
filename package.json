@@ -11,9 +11,14 @@
       "default": "./index.js"
     }
   },
+  "bin": {
+    "freshjots": "./bin/freshjots.js"
+  },
   "files": [
     "index.js",
     "index.d.ts",
+    "cli.js",
+    "bin/",
     "README.md",
     "LICENSE"
   ],
