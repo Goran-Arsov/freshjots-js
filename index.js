@@ -18,7 +18,7 @@
 // payload ({ "notes": [...] }). show / show-by-filename / create return
 // the note object at the TOP LEVEL — there is no { "note": ... } wrapper.
 
-export const VERSION = "0.2.1";
+export const VERSION = "0.3.0";
 const DEFAULT_BASE_URL = "https://freshjots.com/api/v1";
 
 export class ApiError extends Error {

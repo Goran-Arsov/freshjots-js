@@ -1,6 +1,6 @@
 {
   "name": "freshjots",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Tiny JavaScript client for the Fresh Jots API. Append-only notebooks for cron jobs, deploy scripts, and bots.",
   "type": "module",
   "main": "index.js",
