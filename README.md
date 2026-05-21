@@ -1,4 +1,4 @@
-# freshjots — JavaScript
+# freshjots — JS, TS, Windows CLI 
 
 Tiny JavaScript client for the [Fresh Jots](https://freshjots.com) API.
 One file, zero dependencies (uses Node 18's global `fetch`).
