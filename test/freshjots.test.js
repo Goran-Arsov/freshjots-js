@@ -24,8 +24,8 @@ function stubFetch(respond) {
   return { calls, restore: () => { globalThis.fetch = original; } };
 }
 
-test("VERSION is pinned to 0.3.0", () => {
-  assert.equal(VERSION, "0.3.0");
+test("VERSION is pinned to 0.4.0", () => {
+  assert.equal(VERSION, "0.4.0");
 });
 
 test("Client throws when no token is available", () => {
@@ -139,6 +139,78 @@ test("non-2xx throws ApiError carrying the stable envelope", async () => {
       (e) => e instanceof ApiError && e.status === 422 && e.code === "cap_exceeded" &&
              e.message === "over" && Array.isArray(e.details),
     );
+  } finally {
+    restore();
+  }
+});
+
+test("notes(opts) builds the query string from sort/folderId/limit/offset", async () => {
+  const { calls, restore } = stubFetch({ ok: true, status: 200, body: { notes: [] } });
+  try {
+    await new Client({ token: "mn_x" }).notes({ sort: "created", folderId: "none", limit: 5, offset: 10 });
+    const url = calls[0][0];
+    assert.match(url, /\/notes\?/);
+    assert.match(url, /sort=created/);
+    assert.match(url, /folder_id=none/);
+    assert.match(url, /limit=5/);
+    assert.match(url, /offset=10/);
+  } finally {
+    restore();
+  }
+});
+
+test("notes() with no opts hits the bare /notes path", async () => {
+  const { calls, restore } = stubFetch({ ok: true, status: 200, body: { notes: [] } });
+  try {
+    await new Client({ token: "mn_x" }).notes();
+    assert.match(calls[0][0], /\/notes$/);
+  } finally {
+    restore();
+  }
+});
+
+test("noteById fetches /notes/:id at the top level", async () => {
+  const { calls, restore } = stubFetch({ ok: true, status: 200, body: { id: 42, plain_body: "b" } });
+  try {
+    const note = await new Client({ token: "mn_x" }).noteById(42);
+    assert.equal(note.id, 42);
+    assert.match(calls[0][0], /\/notes\/42$/);
+  } finally {
+    restore();
+  }
+});
+
+test("remove sends DELETE /notes/:id and returns true on 204", async () => {
+  const { calls, restore } = stubFetch({ ok: true, status: 204 });
+  try {
+    const ok = await new Client({ token: "mn_x" }).remove(42);
+    assert.equal(ok, true);
+    assert.equal(calls[0][1].method, "DELETE");
+    assert.match(calls[0][0], /\/notes\/42$/);
+  } finally {
+    restore();
+  }
+});
+
+test("move posts folder_id, and null for the 'none' sentinel", async () => {
+  const { calls, restore } = stubFetch({ ok: true, status: 200, body: { id: 1, folder_id: 3 } });
+  try {
+    const c = new Client({ token: "mn_x" });
+    await c.move(1, 3);
+    assert.match(calls[0][0], /\/notes\/1\/move$/);
+    assert.equal(JSON.parse(calls[0][1].body).folder_id, 3);
+    await c.move(1, "none");
+    assert.equal(JSON.parse(calls[1][1].body).folder_id, null);
+  } finally {
+    restore();
+  }
+});
+
+test("folders unwraps the { folders: [...] } envelope", async () => {
+  const { restore } = stubFetch({ ok: true, status: 200, body: { folders: [{ id: 3, name: "Work" }] } });
+  try {
+    const folders = await new Client({ token: "mn_x" }).folders();
+    assert.equal(folders[0].name, "Work");
   } finally {
     restore();
   }

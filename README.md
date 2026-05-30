@@ -26,9 +26,9 @@ await client.append("cron-jobs-prod", "backup ok");
 const note = await client.note("cron-jobs-prod");
 console.log(note.plain_body);
 
-// List your notes.
-const notes = await client.notes();
-for (const n of notes) console.log(`${n.filename}\t${n.title}`);
+// List your notes (most recent activity first). Pass options to sort/filter:
+const notes = await client.notes({ sort: "created", folderId: 3, limit: 20 });
+for (const n of notes) console.log(`${n.id}\t${n.filename}\t${n.title}`);
 
 // Create a note. The API derives the filename from the title — for a
 // note addressable by an exact filename, use append() instead.
@@ -36,10 +36,13 @@ const created = await client.create({ title: "Research 2026 Q2", body: "Initial 
 console.log(created.filename); // server-derived stream name
 ```
 
-The whole API is four methods: `notes()`, `note(filename)`,
-`create({ title, body })`, `append(filename, text)`. `note()` and
-`create()` return the note object directly (no `{ note: … }` wrapper);
-`notes()` returns the array.
+Client methods: `notes({ sort, folderId, limit, offset })`,
+`note(filename)`, `noteById(id)`, `create({ title, body })`,
+`append(filename, text)`, `remove(id)`, `move(id, folderId)`, and
+`folders()`. `note()`/`noteById()`/`create()` return the note object
+directly (no `{ note: … }` wrapper); `notes()` and `folders()` return
+arrays. For `notes()`, `sort` is `created|updated|appended` and
+`folderId` may be a folder id or `"none"` (un-foldered only).
 
 ## CLI
 
@@ -54,13 +57,20 @@ npm install -g freshjots
 export FRESHJOTS_TOKEN=mn_…           # PowerShell: $env:FRESHJOTS_TOKEN = "mn_…"
 ```
 
-The CLI mirrors the four API methods one-for-one:
+The CLI covers reading, writing, and organizing notes:
 
 ```sh
-freshjots list                            # prints "<filename>\t<title>" per row
-freshjots show cron-jobs-prod             # prints the note's plain_body
-freshjots create "Research 2026 Q2"       # body comes from stdin or --body
+freshjots ls                              # prints "<id>\t<filename>\t<title>" per row
+freshjots ls -n 10 --sort created         # last 10 by creation (--sort created|updated|appended)
+freshjots ls --folder Work                # filter by folder id or name; --root for un-foldered
+freshjots ls --all -l                     # every page, long format (id, updated, lock, folder, …)
+freshjots get 42                          # full note as JSON
+freshjots cat cron-jobs-prod              # note body, by id or filename
+freshjots create "Research 2026 Q2"       # body from stdin or --body
 freshjots append cron-jobs-prod "ok"      # text may also be piped on stdin
+freshjots rm cron-jobs-prod               # delete by id or filename
+freshjots mv cron-jobs-prod Work          # move into a folder (id or name); --root to un-folder
+freshjots folders                         # prints "<id>\t<name>" per row
 ```
 
 Both `create` and `append` read from stdin when the body or text isn't
@@ -133,8 +143,8 @@ Stable error codes: `unauthenticated`, `forbidden`, `not_found`,
 
 ## Auth
 
-Mint a token at <https://freshjots.com/settings/api_tokens> (Dev or
-Dev-pro tier required). Set it once:
+Mint a token at <https://freshjots.com/settings/api_tokens> (Pro or
+Team tier required). Set it once:
 
 ```sh
 export FRESHJOTS_TOKEN=<your-token>

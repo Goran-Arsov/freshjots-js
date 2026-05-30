@@ -14,10 +14,14 @@ function harness({ token = "mn_test", stdin } = {}) {
   const err = [];
   const calls = [];
   const fakeClient = {
-    notes: async () => { calls.push(["notes"]); return [{ filename: "a", title: "Alpha" }, { filename: "b", title: "Beta" }]; },
-    note: async (filename) => { calls.push(["note", filename]); return { filename, title: "T", plain_body: "hello world" }; },
+    notes: async (opts) => { calls.push(["notes", opts]); return [{ id: 1, filename: "a", title: "Alpha" }, { id: 2, filename: "b", title: "Beta" }]; },
+    note: async (filename) => { calls.push(["note", filename]); return { id: 7, filename, title: "T", plain_body: "hello world" }; },
+    noteById: async (id) => { calls.push(["noteById", id]); return { id, filename: "byid", title: "T", plain_body: "by id body" }; },
     create: async (input) => { calls.push(["create", input]); return { id: 1, filename: "derived-slug", title: input.title, plain_body: input.body ?? "" }; },
     append: async (filename, text) => { calls.push(["append", filename, text]); return true; },
+    remove: async (id) => { calls.push(["remove", id]); return true; },
+    move: async (id, folderId) => { calls.push(["move", id, folderId]); return { id, folder_id: folderId }; },
+    folders: async () => { calls.push(["folders"]); return [{ id: 3, name: "Work" }, { id: 4, name: "Archive" }]; },
   };
   const deps = {
     env: { FRESHJOTS_TOKEN: token },
@@ -47,15 +51,31 @@ test("parseArgs: --version / -v / version", () => {
   }
 });
 
-test("parseArgs: list takes no positional", () => {
-  assert.deepEqual(parseArgs(["list"]), { command: "list" });
-  assert.equal(parseArgs(["list", "extra"]).command, "error");
+test("parseArgs: list/ls default shape", () => {
+  const want = { command: "list", limit: null, sort: null, folder: null, all: false, long: false };
+  assert.deepEqual(parseArgs(["list"]), want);
+  assert.deepEqual(parseArgs(["ls"]), want);
 });
 
-test("parseArgs: show requires exactly one filename", () => {
-  assert.deepEqual(parseArgs(["show", "log"]), { command: "show", filename: "log" });
+test("parseArgs: list parses flags", () => {
+  assert.deepEqual(parseArgs(["ls", "-n", "5", "--sort", "created", "--folder", "Work", "--all", "-l"]), {
+    command: "list", limit: "5", sort: "created", folder: "Work", all: true, long: true,
+  });
+  assert.equal(parseArgs(["ls", "--root"]).folder, "none");
+  assert.equal(parseArgs(["ls", "--limit"]).command, "error");
+  assert.equal(parseArgs(["ls", "--bogus"]).command, "error");
+});
+
+test("parseArgs: get requires exactly one id", () => {
+  assert.deepEqual(parseArgs(["get", "42"]), { command: "get", id: "42" });
+  assert.equal(parseArgs(["get"]).command, "error");
+});
+
+test("parseArgs: show/cat take one id-or-filename as target", () => {
+  assert.deepEqual(parseArgs(["show", "log"]), { command: "show", target: "log" });
+  assert.deepEqual(parseArgs(["cat", "42"]), { command: "show", target: "42" });
   assert.equal(parseArgs(["show"]).command, "error");
-  assert.equal(parseArgs(["show", "a", "b"]).command, "error");
+  assert.equal(parseArgs(["cat", "a", "b"]).command, "error");
 });
 
 test("parseArgs: create accepts title with --body, -b, --body=value", () => {
@@ -72,6 +92,23 @@ test("parseArgs: append accepts filename + optional text", () => {
   assert.deepEqual(parseArgs(["append", "log", "hi"]), { command: "append", filename: "log", text: "hi" });
   assert.equal(parseArgs(["append"]).command, "error");
   assert.equal(parseArgs(["append", "a", "b", "c"]).command, "error");
+});
+
+test("parseArgs: rm/delete take one id-or-filename target", () => {
+  assert.deepEqual(parseArgs(["rm", "x"]), { command: "rm", target: "x" });
+  assert.deepEqual(parseArgs(["delete", "42"]), { command: "rm", target: "42" });
+  assert.equal(parseArgs(["rm"]).command, "error");
+});
+
+test("parseArgs: mv/move take a target and a destination", () => {
+  assert.deepEqual(parseArgs(["mv", "x", "Work"]), { command: "mv", target: "x", dest: "Work" });
+  assert.deepEqual(parseArgs(["move", "42", "--root"]), { command: "mv", target: "42", dest: "--root" });
+  assert.equal(parseArgs(["mv", "x"]).command, "error");
+});
+
+test("parseArgs: folders takes no arguments", () => {
+  assert.deepEqual(parseArgs(["folders"]), { command: "folders" });
+  assert.equal(parseArgs(["folders", "x"]).command, "error");
 });
 
 test("parseArgs: unknown command yields error", () => {
@@ -111,20 +148,95 @@ test("run: missing FRESHJOTS_TOKEN errors with code 1", async () => {
   assert.match(h.err(), /FRESHJOTS_TOKEN is not set/);
 });
 
-test("run: list prints `filename\\ttitle` per row", async () => {
+test("run: list prints `id\\tfilename\\ttitle` per row", async () => {
   const h = harness();
   const code = await run(["list"], h.deps);
   assert.equal(code, 0);
-  assert.equal(h.out(), "a\tAlpha\nb\tBeta\n");
-  assert.deepEqual(h.calls[0], ["notes"]);
+  assert.equal(h.out(), "1\ta\tAlpha\n2\tb\tBeta\n");
+  assert.deepEqual(h.calls[0], ["notes", { sort: null, folderId: undefined, limit: undefined }]);
 });
 
-test("run: show prints plain_body verbatim", async () => {
+test("run: list forwards sort + numeric folder + limit", async () => {
   const h = harness();
-  const code = await run(["show", "log"], h.deps);
-  assert.equal(code, 0);
+  await run(["ls", "-n", "5", "--sort", "created", "--folder", "9"], h.deps);
+  assert.deepEqual(h.calls[0], ["notes", { sort: "created", folderId: "9", limit: "5" }]);
+});
+
+test("run: list --root passes the 'none' folder sentinel", async () => {
+  const h = harness();
+  await run(["ls", "--root"], h.deps);
+  assert.equal(h.calls[0][1].folderId, "none");
+});
+
+test("run: list --folder <name> resolves the name to an id", async () => {
+  const h = harness();
+  await run(["ls", "--folder", "Work"], h.deps);
+  assert.deepEqual(h.calls[0], ["folders"]);          // resolved name first
+  assert.equal(h.calls[1][1].folderId, 3);            // Work -> id 3
+});
+
+test("run: list -l prints the long format", async () => {
+  const h = harness();
+  h.deps.clientFactory = () => ({
+    notes: async () => [{ id: 5, filename: "f", title: "T", append_only: true, folder_id: 9, updated_at: "2026-05-29T00:00:00Z" }],
+  });
+  await run(["ls", "-l"], h.deps);
+  assert.equal(h.out(), "5\t2026-05-29T00:00:00Z\tL\t9\tf\tT\n");
+});
+
+test("run: cat by filename prints plain_body", async () => {
+  const h = harness();
+  await run(["cat", "log"], h.deps);
   assert.equal(h.out(), "hello world");
   assert.deepEqual(h.calls[0], ["note", "log"]);
+});
+
+test("run: cat by numeric id uses noteById", async () => {
+  const h = harness();
+  await run(["cat", "42"], h.deps);
+  assert.equal(h.out(), "by id body");
+  assert.deepEqual(h.calls[0], ["noteById", "42"]);
+});
+
+test("run: get prints the full note as JSON", async () => {
+  const h = harness();
+  await run(["get", "42"], h.deps);
+  assert.deepEqual(h.calls[0], ["noteById", "42"]);
+  assert.match(h.out(), /"id": "42"/);
+});
+
+test("run: rm by id calls remove directly", async () => {
+  const h = harness();
+  const code = await run(["rm", "42"], h.deps);
+  assert.equal(code, 0);
+  assert.deepEqual(h.calls[0], ["remove", "42"]);
+});
+
+test("run: rm by name resolves to an id first", async () => {
+  const h = harness();
+  await run(["rm", "my-note"], h.deps);
+  assert.deepEqual(h.calls[0], ["note", "my-note"]); // resolve
+  assert.deepEqual(h.calls[1], ["remove", 7]);       // note().id
+});
+
+test("run: mv to a folder by name resolves both note and folder", async () => {
+  const h = harness();
+  await run(["mv", "my-note", "Work"], h.deps);
+  assert.deepEqual(h.calls[0], ["note", "my-note"]); // note -> id 7
+  assert.deepEqual(h.calls[1], ["folders"]);          // Work -> id 3
+  assert.deepEqual(h.calls[2], ["move", 7, 3]);
+});
+
+test("run: mv --root moves to the root (null folder)", async () => {
+  const h = harness();
+  await run(["mv", "42", "--root"], h.deps);
+  assert.deepEqual(h.calls[0], ["move", "42", null]);
+});
+
+test("run: folders prints `id\\tname` per row", async () => {
+  const h = harness();
+  await run(["folders"], h.deps);
+  assert.equal(h.out(), "3\tWork\n4\tArchive\n");
 });
 
 test("run: create with --body forwards title+body and prints derived filename", async () => {

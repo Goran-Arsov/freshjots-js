@@ -18,7 +18,7 @@
 // payload ({ "notes": [...] }). show / show-by-filename / create return
 // the note object at the TOP LEVEL — there is no { "note": ... } wrapper.
 
-export const VERSION = "0.3.0";
+export const VERSION = "0.4.0";
 const DEFAULT_BASE_URL = "https://freshjots.com/api/v1";
 
 export class ApiError extends Error {
@@ -40,8 +40,20 @@ export class Client {
     this.baseUrl = baseUrl;
   }
 
-  async notes() {
-    return (await this._request("GET", "/notes")).notes;
+  // List notes (summary projection). Options mirror the API query params:
+  //   sort:    "created" | "updated" | "appended"  (default updated)
+  //   folderId: a folder id, or "none" for un-foldered notes only
+  //   limit/offset: pagination (server caps a page at 200)
+  async notes({ sort, folderId, limit, offset } = {}) {
+    const qs = new URLSearchParams();
+    if (sort) qs.set("sort", sort);
+    if (folderId !== undefined && folderId !== null && folderId !== "") {
+      qs.set("folder_id", String(folderId));
+    }
+    if (limit !== undefined && limit !== null && limit !== "") qs.set("limit", String(limit));
+    if (offset !== undefined && offset !== null && offset !== "") qs.set("offset", String(offset));
+    const q = qs.toString();
+    return (await this._request("GET", q ? `/notes?${q}` : "/notes")).notes;
   }
 
   async note(filename) {
@@ -49,6 +61,32 @@ export class Client {
     // { note: ... } wrapper), so return the response as-is.
     const path = `/notes/by-filename/${encodeURIComponent(filename)}`;
     return await this._request("GET", path);
+  }
+
+  // Full note by numeric id (GET /notes/:id) — top-level serializer.
+  async noteById(id) {
+    return await this._request("GET", `/notes/${encodeURIComponent(id)}`);
+  }
+
+  // Delete a note by id. Locked (append-only) notes are refused by the
+  // API with note_locked. Returns true on success (204).
+  async remove(id) {
+    await this._request("DELETE", `/notes/${encodeURIComponent(id)}`);
+    return true;
+  }
+
+  // Move a note into a folder (or to the root with folderId null/"none").
+  async move(id, folderId) {
+    const folder_id =
+      folderId === null || folderId === undefined || folderId === "" || folderId === "none"
+        ? null
+        : folderId;
+    return await this._request("POST", `/notes/${encodeURIComponent(id)}/move`, { folder_id });
+  }
+
+  // List folders ({ folders: [...] } envelope).
+  async folders() {
+    return (await this._request("GET", "/folders")).folders;
   }
 
   // Create a note. The API permits note[title, plain_body, format, ...]

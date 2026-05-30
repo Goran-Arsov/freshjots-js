@@ -8,10 +8,19 @@ import { Client, ApiError, VERSION } from "./index.js";
 const USAGE = `freshjots — Fresh Jots CLI
 
 Usage:
-  freshjots list
-  freshjots show <filename>
+  freshjots ls [flags]                 List notes as id<TAB>filename<TAB>title.
+                                         -n N | --limit N
+                                         --sort created|updated|appended
+                                         --folder <id|name> | --root
+                                         --all      fetch every page (past the 200 cap)
+                                         -l|--long  id, updated_at, lock, folder, name, title
+  freshjots get <id>                   Print a note as JSON (full metadata).
+  freshjots cat <id|filename>          Print a note's body.
   freshjots create <title> [--body <text>]
   freshjots append <filename> [<text>]
+  freshjots rm <id|filename>           Delete a note.
+  freshjots mv <id|filename> <folder-id|name|--root>
+  freshjots folders                    List folders as id<TAB>name.
   freshjots --help | --version
 
 Notes:
@@ -19,6 +28,9 @@ Notes:
   - Auth: set FRESHJOTS_TOKEN. Mint one at
     https://freshjots.com/settings/api_tokens.
 `;
+
+const isNumeric = (s) => /^\d+$/.test(s);
+const errResult = (message) => ({ command: "error", message });
 
 export function parseArgs(argv) {
   if (argv.length === 0) return { command: "help", exitCode: 2 };
@@ -30,13 +42,38 @@ export function parseArgs(argv) {
   if (first === "-v" || first === "--version" || first === "version") {
     return { command: "version" };
   }
-  if (first === "list") {
-    if (rest.length) return { command: "error", message: "list takes no arguments" };
-    return { command: "list" };
+  if (first === "list" || first === "ls") {
+    const opts = { command: "list", limit: null, sort: null, folder: null, all: false, long: false };
+    for (let i = 0; i < rest.length; i++) {
+      const a = rest[i];
+      if (a === "-n" || a === "--limit") {
+        if (i + 1 >= rest.length) return errResult("--limit requires a value");
+        opts.limit = rest[++i];
+      } else if (a === "--sort") {
+        if (i + 1 >= rest.length) return errResult("--sort requires a value");
+        opts.sort = rest[++i];
+      } else if (a === "--folder") {
+        if (i + 1 >= rest.length) return errResult("--folder requires a value");
+        opts.folder = rest[++i];
+      } else if (a === "--root") {
+        opts.folder = "none";
+      } else if (a === "--all") {
+        opts.all = true;
+      } else if (a === "-l" || a === "--long") {
+        opts.long = true;
+      } else {
+        return errResult(`unknown flag for list: ${a}`);
+      }
+    }
+    return opts;
   }
-  if (first === "show") {
-    if (rest.length !== 1) return { command: "error", message: "show requires exactly one <filename>" };
-    return { command: "show", filename: rest[0] };
+  if (first === "get") {
+    if (rest.length !== 1) return errResult("get requires exactly one <id>");
+    return { command: "get", id: rest[0] };
+  }
+  if (first === "show" || first === "cat") {
+    if (rest.length !== 1) return errResult(`${first} requires exactly one <id|filename>`);
+    return { command: "show", target: rest[0] };
   }
   if (first === "create") {
     let body;
@@ -44,7 +81,7 @@ export function parseArgs(argv) {
     for (let i = 0; i < rest.length; i++) {
       const a = rest[i];
       if (a === "--body" || a === "-b") {
-        if (i + 1 >= rest.length) return { command: "error", message: "--body requires a value" };
+        if (i + 1 >= rest.length) return errResult("--body requires a value");
         body = rest[++i];
       } else if (a.startsWith("--body=")) {
         body = a.slice("--body=".length);
@@ -52,16 +89,28 @@ export function parseArgs(argv) {
         positional.push(a);
       }
     }
-    if (positional.length !== 1) return { command: "error", message: "create requires exactly one <title>" };
+    if (positional.length !== 1) return errResult("create requires exactly one <title>");
     return { command: "create", title: positional[0], body };
   }
   if (first === "append") {
     if (rest.length < 1 || rest.length > 2) {
-      return { command: "error", message: "append requires <filename> and optional <text>" };
+      return errResult("append requires <filename> and optional <text>");
     }
     return { command: "append", filename: rest[0], text: rest[1] };
   }
-  return { command: "error", message: `unknown command: ${first}` };
+  if (first === "rm" || first === "delete") {
+    if (rest.length !== 1) return errResult(`${first} requires exactly one <id|filename>`);
+    return { command: "rm", target: rest[0] };
+  }
+  if (first === "mv" || first === "move") {
+    if (rest.length !== 2) return errResult(`${first} requires <id|filename> <folder-id|name|--root>`);
+    return { command: "mv", target: rest[0], dest: rest[1] };
+  }
+  if (first === "folders") {
+    if (rest.length) return errResult("folders takes no arguments");
+    return { command: "folders" };
+  }
+  return errResult(`unknown command: ${first}`);
 }
 
 async function readStdin(stdin) {
@@ -71,6 +120,34 @@ async function readStdin(stdin) {
     buf += typeof chunk === "string" ? chunk : chunk.toString("utf8");
   }
   return buf;
+}
+
+// A note argument may be a numeric id (used as-is) or a filename/title,
+// resolved to an id via the by-filename lookup (which carries .id).
+async function resolveNoteId(client, target) {
+  if (isNumeric(target)) return target;
+  return (await client.note(target)).id;
+}
+
+// A folder NAME resolves to its id via GET /folders; ambiguous or unknown
+// names are an error (disambiguate with the numeric id).
+async function resolveFolderName(client, name) {
+  const matches = (await client.folders()).filter((f) => f.name === name);
+  if (matches.length === 0) throw new Error(`no folder named '${name}' (see: freshjots folders)`);
+  if (matches.length > 1) throw new Error(`ambiguous folder name '${name}' — use its numeric id`);
+  return matches[0].id;
+}
+
+function printNotes(notes, long, stdout) {
+  for (const n of notes) {
+    const title = n.title ?? "(untitled)";
+    if (long) {
+      const lock = n.append_only ? "L" : "-";
+      stdout(`${n.id}\t${n.updated_at}\t${lock}\t${n.folder_id ?? "-"}\t${n.filename}\t${title}\n`);
+    } else {
+      stdout(`${n.id}\t${n.filename}\t${title}\n`);
+    }
+  }
 }
 
 export async function run(argv, deps = {}) {
@@ -111,12 +188,40 @@ export async function run(argv, deps = {}) {
 
   try {
     if (parsed.command === "list") {
-      const notes = await client.notes();
-      for (const n of notes) stdout(`${n.filename}\t${n.title}\n`);
+      let folderId;
+      if (parsed.folder) {
+        if (parsed.folder === "none") folderId = "none";
+        else if (isNumeric(parsed.folder)) folderId = parsed.folder;
+        else folderId = await resolveFolderName(client, parsed.folder);
+      }
+      let notes;
+      if (parsed.all) {
+        notes = [];
+        let offset = 0;
+        for (;;) {
+          const page = await client.notes({ sort: parsed.sort, folderId, limit: 200, offset });
+          notes.push(...page);
+          if (page.length < 200) break;
+          offset += 200;
+          if (offset >= 100000) {
+            stderr("stopping at 100000 notes (safety cap) — narrow with --folder or --sort\n");
+            break;
+          }
+        }
+      } else {
+        notes = await client.notes({ sort: parsed.sort, folderId, limit: parsed.limit ?? undefined });
+      }
+      printNotes(notes, parsed.long, stdout);
+      return 0;
+    }
+    if (parsed.command === "get") {
+      stdout(`${JSON.stringify(await client.noteById(parsed.id), null, 2)}\n`);
       return 0;
     }
     if (parsed.command === "show") {
-      const note = await client.note(parsed.filename);
+      const note = isNumeric(parsed.target)
+        ? await client.noteById(parsed.target)
+        : await client.note(parsed.target);
       stdout(note.plain_body ?? "");
       return 0;
     }
@@ -135,6 +240,23 @@ export async function run(argv, deps = {}) {
         return 2;
       }
       await client.append(parsed.filename, text);
+      return 0;
+    }
+    if (parsed.command === "rm") {
+      await client.remove(await resolveNoteId(client, parsed.target));
+      return 0;
+    }
+    if (parsed.command === "mv") {
+      const id = await resolveNoteId(client, parsed.target);
+      let folderId;
+      if (["--root", "root", "none", "null"].includes(parsed.dest)) folderId = null;
+      else if (isNumeric(parsed.dest)) folderId = parsed.dest;
+      else folderId = await resolveFolderName(client, parsed.dest);
+      await client.move(id, folderId);
+      return 0;
+    }
+    if (parsed.command === "folders") {
+      for (const f of await client.folders()) stdout(`${f.id}\t${f.name}\n`);
       return 0;
     }
   } catch (e) {
