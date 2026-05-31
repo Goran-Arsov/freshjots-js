@@ -1,7 +1,59 @@
-# freshjots — JS, TS, Windows CLI 
+# freshjots — JS, TS, Windows CLI
 
 Tiny JavaScript client for the [Fresh Jots](https://freshjots.com) API.
 One file, zero dependencies (uses Node 18's global `fetch`).
+
+## CLI
+
+Installing the package globally puts a `freshjots` command on your
+PATH, so you can read and write notes straight from a terminal without
+writing any JavaScript. This works in bash, zsh, fish, Windows
+PowerShell, and CMD — npm generates a `.cmd` shim on Windows
+automatically.
+
+```sh
+npm install -g freshjots
+
+# Persist the token for every new shell (macOS defaults to zsh; use ~/.bashrc on bash):
+echo 'export FRESHJOTS_TOKEN=mn_…' >> ~/.zshrc && source ~/.zshrc
+# Windows PowerShell: [Environment]::SetEnvironmentVariable("FRESHJOTS_TOKEN", "mn_…", "User")
+```
+
+The CLI covers reading, writing, and organizing notes:
+
+```sh
+freshjots ls                              # prints "<id>\t<filename>\t<title>" per row
+freshjots ls -n 10 --sort created         # last 10 by creation (--sort created|updated|appended)
+freshjots ls --folder Work                # filter by folder id or name; --root for un-foldered
+freshjots ls --all -l                     # every page, long format (id, updated, lock, folder, …)
+freshjots get 42                          # full note as JSON
+freshjots cat cron-jobs-prod              # note body, by id or filename
+freshjots create "Research 2026 Q2"       # body from stdin or --body
+freshjots append cron-jobs-prod "ok"      # text may also be piped on stdin
+freshjots rm cron-jobs-prod               # delete by id or filename
+freshjots mv cron-jobs-prod Work          # move into a folder (id or name); --root to un-folder
+freshjots folders                         # prints "<id>\t<name>" per row
+freshjots --version                       # print version (--help for full usage)
+```
+
+Both `create` and `append` read from stdin when the body or text isn't
+passed as an argument, so the usual pipe patterns work:
+
+```sh
+backup.sh && echo "backup ok $(date -Iseconds)" | freshjots append cron-jobs-prod
+git log -1 --pretty=format:"%h %s" | freshjots append deploys
+```
+
+The same patterns work in PowerShell:
+
+```powershell
+"backup ok $(Get-Date -Format o)" | freshjots append cron-jobs-prod
+freshjots create "Deploy log" --body "Initial entry."
+```
+
+Exit codes: `0` on success, `1` on runtime errors (missing token,
+network failure, non-2xx API response — printed as `Error: HTTP <status>
+<code>: <message>`), `2` on usage errors.
 
 ## Install
 
@@ -43,54 +95,6 @@ Client methods: `notes({ sort, folderId, limit, offset })`,
 directly (no `{ note: … }` wrapper); `notes()` and `folders()` return
 arrays. For `notes()`, `sort` is `created|updated|appended` and
 `folderId` may be a folder id or `"none"` (un-foldered only).
-
-## CLI
-
-Installing the package globally puts a `freshjots` command on your
-PATH, so you can read and write notes straight from a terminal without
-writing any JavaScript. This works in bash, zsh, fish, Windows
-PowerShell, and CMD — npm generates a `.cmd` shim on Windows
-automatically.
-
-```sh
-npm install -g freshjots
-export FRESHJOTS_TOKEN=mn_…           # PowerShell: $env:FRESHJOTS_TOKEN = "mn_…"
-```
-
-The CLI covers reading, writing, and organizing notes:
-
-```sh
-freshjots ls                              # prints "<id>\t<filename>\t<title>" per row
-freshjots ls -n 10 --sort created         # last 10 by creation (--sort created|updated|appended)
-freshjots ls --folder Work                # filter by folder id or name; --root for un-foldered
-freshjots ls --all -l                     # every page, long format (id, updated, lock, folder, …)
-freshjots get 42                          # full note as JSON
-freshjots cat cron-jobs-prod              # note body, by id or filename
-freshjots create "Research 2026 Q2"       # body from stdin or --body
-freshjots append cron-jobs-prod "ok"      # text may also be piped on stdin
-freshjots rm cron-jobs-prod               # delete by id or filename
-freshjots mv cron-jobs-prod Work          # move into a folder (id or name); --root to un-folder
-freshjots folders                         # prints "<id>\t<name>" per row
-```
-
-Both `create` and `append` read from stdin when the body or text isn't
-passed as an argument, so the usual pipe patterns work:
-
-```sh
-backup.sh && echo "backup ok $(date -Iseconds)" | freshjots append cron-jobs-prod
-git log -1 --pretty=format:"%h %s" | freshjots append deploys
-```
-
-The same patterns work in PowerShell:
-
-```powershell
-"backup ok $(Get-Date -Format o)" | freshjots append cron-jobs-prod
-freshjots create "Deploy log" --body "Initial entry."
-```
-
-Exit codes: `0` on success, `1` on runtime errors (missing token,
-network failure, non-2xx API response — printed as `Error: HTTP <status>
-<code>: <message>`), `2` on usage errors.
 
 ## TypeScript
 
