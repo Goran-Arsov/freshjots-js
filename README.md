@@ -147,7 +147,7 @@ Stable error codes: `unauthenticated`, `forbidden`, `not_found`,
 
 ## Auth
 
-Mint a token at <https://freshjots.com/settings/api_tokens> (Pro or
+Mint a token at <https://freshjots.com/settings/api_tokens> (Dev or
 Team tier required). Set it once:
 
 ```sh
