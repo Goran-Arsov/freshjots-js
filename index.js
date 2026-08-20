@@ -18,7 +18,7 @@
 // payload ({ "notes": [...] }). show / show-by-filename / create return
 // the note object at the TOP LEVEL — there is no { "note": ... } wrapper.
 
-export const VERSION = "1.0.2";
+export const VERSION = "1.1.0";
 const DEFAULT_BASE_URL = "https://freshjots.com/api/v1";
 
 // Client-side encryption helpers (format "fj1", interoperable with the Python
