@@ -72,24 +72,24 @@ test("parseArgs: get requires exactly one id", () => {
 });
 
 test("parseArgs: show/cat take one id-or-filename as target", () => {
-  assert.deepEqual(parseArgs(["show", "log"]), { command: "show", target: "log" });
-  assert.deepEqual(parseArgs(["cat", "42"]), { command: "show", target: "42" });
+  assert.deepEqual(parseArgs(["show", "log"]), { command: "show", target: "log", decrypt: false });
+  assert.deepEqual(parseArgs(["cat", "42"]), { command: "show", target: "42", decrypt: false });
   assert.equal(parseArgs(["show"]).command, "error");
   assert.equal(parseArgs(["cat", "a", "b"]).command, "error");
 });
 
 test("parseArgs: create accepts title with --body, -b, --body=value", () => {
-  assert.deepEqual(parseArgs(["create", "Title"]), { command: "create", title: "Title", body: undefined });
-  assert.deepEqual(parseArgs(["create", "Title", "--body", "x"]), { command: "create", title: "Title", body: "x" });
-  assert.deepEqual(parseArgs(["create", "Title", "-b", "x"]), { command: "create", title: "Title", body: "x" });
-  assert.deepEqual(parseArgs(["create", "Title", "--body=x"]), { command: "create", title: "Title", body: "x" });
+  assert.deepEqual(parseArgs(["create", "Title"]), { command: "create", title: "Title", body: undefined, encrypt: false });
+  assert.deepEqual(parseArgs(["create", "Title", "--body", "x"]), { command: "create", title: "Title", body: "x", encrypt: false });
+  assert.deepEqual(parseArgs(["create", "Title", "-b", "x"]), { command: "create", title: "Title", body: "x", encrypt: false });
+  assert.deepEqual(parseArgs(["create", "Title", "--body=x"]), { command: "create", title: "Title", body: "x", encrypt: false });
   assert.equal(parseArgs(["create"]).command, "error");
   assert.equal(parseArgs(["create", "Title", "--body"]).command, "error");
 });
 
 test("parseArgs: append accepts filename + optional text", () => {
-  assert.deepEqual(parseArgs(["append", "log"]), { command: "append", filename: "log", text: undefined });
-  assert.deepEqual(parseArgs(["append", "log", "hi"]), { command: "append", filename: "log", text: "hi" });
+  assert.deepEqual(parseArgs(["append", "log"]), { command: "append", filename: "log", text: undefined, encrypt: false });
+  assert.deepEqual(parseArgs(["append", "log", "hi"]), { command: "append", filename: "log", text: "hi", encrypt: false });
   assert.equal(parseArgs(["append"]).command, "error");
   assert.equal(parseArgs(["append", "a", "b", "c"]).command, "error");
 });

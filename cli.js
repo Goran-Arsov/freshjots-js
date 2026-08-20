@@ -3,7 +3,7 @@
 // stays import-safe and testable: parseArgs is pure, run takes its I/O
 // surface as deps so tests can stub stdin/stdout/stderr and the Client.
 
-import { Client, ApiError, VERSION } from "./index.js";
+import { Client, ApiError, VERSION, encrypt, decrypt, isEncrypted } from "./index.js";
 
 const USAGE = `freshjots — Fresh Jots CLI
 
@@ -15,16 +15,21 @@ Usage:
                                          --all      fetch every page (past the 200 cap)
                                          -l|--long  id, updated_at, lock, folder, name, title
   freshjots get <id>                   Print a note as JSON (full metadata).
-  freshjots cat <id|filename>          Print a note's body.
-  freshjots create <title> [--body <text>]
-  freshjots append <filename> [<text>]
+  freshjots cat <id|filename> [--decrypt]   Print a note's body.
+  freshjots create <title> [--body <text>] [--encrypt]
+  freshjots append <filename> [<text>] [--encrypt]
   freshjots rm <id|filename>           Delete a note.
   freshjots mv <id|filename> <folder-id|name|--root>
   freshjots folders                    List folders as id<TAB>name.
+  freshjots encrypt                    Encrypt stdin, print an fj1: token.
+  freshjots decrypt                    Decrypt fj1: lines from stdin to plaintext.
   freshjots --help | --version
 
 Notes:
   - <text> for append and --body for create may also be piped on stdin.
+  - --encrypt / --decrypt and the encrypt/decrypt commands encrypt client-side
+    with the passphrase in FRESHJOTS_PASSPHRASE; the server only ever stores the
+    ciphertext and cannot read it. Lose the passphrase and the note is lost.
   - Auth: set FRESHJOTS_TOKEN. Mint one at
     https://freshjots.com/settings/api_tokens.
 `;
@@ -72,11 +77,18 @@ export function parseArgs(argv) {
     return { command: "get", id: rest[0] };
   }
   if (first === "show" || first === "cat") {
-    if (rest.length !== 1) return errResult(`${first} requires exactly one <id|filename>`);
-    return { command: "show", target: rest[0] };
+    let decrypt = false;
+    const positional = [];
+    for (const a of rest) {
+      if (a === "--decrypt") decrypt = true;
+      else positional.push(a);
+    }
+    if (positional.length !== 1) return errResult(`${first} requires exactly one <id|filename>`);
+    return { command: "show", target: positional[0], decrypt };
   }
   if (first === "create") {
     let body;
+    let encrypt = false;
     const positional = [];
     for (let i = 0; i < rest.length; i++) {
       const a = rest[i];
@@ -85,18 +97,26 @@ export function parseArgs(argv) {
         body = rest[++i];
       } else if (a.startsWith("--body=")) {
         body = a.slice("--body=".length);
+      } else if (a === "--encrypt") {
+        encrypt = true;
       } else {
         positional.push(a);
       }
     }
     if (positional.length !== 1) return errResult("create requires exactly one <title>");
-    return { command: "create", title: positional[0], body };
+    return { command: "create", title: positional[0], body, encrypt };
   }
   if (first === "append") {
-    if (rest.length < 1 || rest.length > 2) {
+    let encrypt = false;
+    const positional = [];
+    for (const a of rest) {
+      if (a === "--encrypt") encrypt = true;
+      else positional.push(a);
+    }
+    if (positional.length < 1 || positional.length > 2) {
       return errResult("append requires <filename> and optional <text>");
     }
-    return { command: "append", filename: rest[0], text: rest[1] };
+    return { command: "append", filename: positional[0], text: positional[1], encrypt };
   }
   if (first === "rm" || first === "delete") {
     if (rest.length !== 1) return errResult(`${first} requires exactly one <id|filename>`);
@@ -110,6 +130,10 @@ export function parseArgs(argv) {
     if (rest.length) return errResult("folders takes no arguments");
     return { command: "folders" };
   }
+  if (first === "encrypt" || first === "decrypt") {
+    if (rest.length) return errResult(`${first} takes no arguments (reads stdin)`);
+    return { command: first };
+  }
   return errResult(`unknown command: ${first}`);
 }
 
@@ -120,6 +144,25 @@ async function readStdin(stdin) {
     buf += typeof chunk === "string" ? chunk : chunk.toString("utf8");
   }
   return buf;
+}
+
+// The passphrase for --encrypt/--decrypt comes from the environment (never a
+// flag or stdin — stdin already carries the note body). Throws if unset.
+function getPassphrase(env) {
+  const p = env.FRESHJOTS_PASSPHRASE;
+  if (!p) throw new Error("FRESHJOTS_PASSPHRASE is not set — required for --encrypt/--decrypt");
+  return p;
+}
+
+// Decrypt a note body line by line: fj1: lines are decrypted, any other line
+// (e.g. a webhook timestamp header) passes through unchanged. Handles both a
+// whole-body ciphertext (one line) and an append stream (one ciphertext line
+// per entry).
+function decryptBody(body, passphrase) {
+  return body
+    .split("\n")
+    .map((line) => (isEncrypted(line) ? decrypt(line, passphrase) : line))
+    .join("\n");
 }
 
 // A note argument may be a numeric id (used as-is) or a filename/title,
@@ -172,6 +215,31 @@ export async function run(argv, deps = {}) {
     return 2;
   }
 
+  // Local, offline crypto — no API call, so no token required (only the
+  // passphrase). encrypt reads plaintext on stdin and prints an fj1: token;
+  // decrypt reads fj1: lines and prints the plaintext.
+  if (parsed.command === "encrypt" || parsed.command === "decrypt") {
+    let passphrase;
+    try {
+      passphrase = getPassphrase(env);
+    } catch (e) {
+      stderr(`Error: ${e.message}\n`);
+      return 1;
+    }
+    const input = await readStdin(stdin);
+    if (!input) {
+      stderr(`Error: ${parsed.command} reads ${parsed.command === "encrypt" ? "plaintext" : "ciphertext"} on stdin\n`);
+      return 2;
+    }
+    try {
+      stdout(parsed.command === "encrypt" ? encrypt(input, passphrase) : decryptBody(input, passphrase));
+      return 0;
+    } catch (e) {
+      stderr(`Error: ${e.message}\n`);
+      return 1;
+    }
+  }
+
   const token = env.FRESHJOTS_TOKEN;
   if (!token) {
     stderr("Error: FRESHJOTS_TOKEN is not set. Mint one at https://freshjots.com/settings/api_tokens\n");
@@ -222,13 +290,20 @@ export async function run(argv, deps = {}) {
       const note = isNumeric(parsed.target)
         ? await client.noteById(parsed.target)
         : await client.note(parsed.target);
-      stdout(note.plain_body ?? "");
+      let body = note.plain_body ?? "";
+      if (parsed.decrypt) body = decryptBody(body, getPassphrase(env));
+      stdout(body);
       return 0;
     }
     if (parsed.command === "create") {
       let body = parsed.body;
       if (body === undefined) body = await readStdin(stdin);
-      const created = await client.create({ title: parsed.title, body });
+      const input = { title: parsed.title, body };
+      if (parsed.encrypt) {
+        input.body = encrypt(body, getPassphrase(env));
+        input.client_encrypted = true;
+      }
+      const created = await client.create(input);
       stdout(`${created.filename}\n`);
       return 0;
     }
@@ -239,7 +314,11 @@ export async function run(argv, deps = {}) {
         stderr("Error: append requires text (as an argument or on stdin)\n");
         return 2;
       }
-      await client.append(parsed.filename, text);
+      if (parsed.encrypt) {
+        await client.append(parsed.filename, encrypt(text, getPassphrase(env)), { client_encrypted: true });
+      } else {
+        await client.append(parsed.filename, text);
+      }
       return 0;
     }
     if (parsed.command === "rm") {
