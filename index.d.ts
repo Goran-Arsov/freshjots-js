@@ -5,6 +5,13 @@
 declare module "freshjots" {
   export const VERSION: string;
 
+  /** True if `text` carries the Fresh Jots ciphertext prefix ("fj1:"). */
+  export function isEncrypted(text: unknown): boolean;
+  /** Encrypt a UTF-8 string with a passphrase (format "fj1"). Returns an "fj1:" token. */
+  export function encrypt(plaintext: string, passphrase: string): string;
+  /** Decrypt an "fj1:" token back to plaintext; throws on a wrong passphrase or tampering. */
+  export function decrypt(token: string, passphrase: string): string;
+
   /** Full note envelope returned by `note()` and `create()`. */
   export interface Note {
     id: number;
@@ -14,6 +21,8 @@ declare module "freshjots" {
     folder_id: number | null;
     pinned: boolean;
     append_only: boolean;
+    /** The note is marked client-encrypted (body is opaque ciphertext). */
+    client_encrypted: boolean;
     append_deadline_hours: number | null;
     alert_email: string | null;
     last_appended_at: string | null;
@@ -86,6 +95,14 @@ declare module "freshjots" {
   export interface CreateInput {
     title: string;
     body?: string;
+    /** Mark the note client-encrypted (`body` is ciphertext from `encrypt()`). Personal accounts only. */
+    client_encrypted?: boolean;
+  }
+
+  /** Options for `append()`. */
+  export interface AppendOptions {
+    /** On first-touch creation, open the stream as a client-encrypted note. */
+    client_encrypted?: boolean;
   }
 
   export class Client {
@@ -96,7 +113,7 @@ declare module "freshjots" {
     note(filename: string): Promise<Note>;
     noteById(id: number | string): Promise<Note>;
     create(input: CreateInput): Promise<Note>;
-    append(filename: string, text: string): Promise<true>;
+    append(filename: string, text: string, options?: AppendOptions): Promise<true>;
     remove(id: number | string): Promise<true>;
     move(id: number | string, folderId: number | string | null): Promise<Note>;
     folders(): Promise<Folder[]>;

@@ -89,9 +89,10 @@ console.log(created.filename); // server-derived stream name
 ```
 
 Client methods: `notes({ sort, folderId, limit, offset })`,
-`note(filename)`, `noteById(id)`, `create({ title, body })`,
-`append(filename, text)`, `remove(id)`, `move(id, folderId)`, and
-`folders()`. `note()`/`noteById()`/`create()` return the note object
+`note(filename)`, `noteById(id)`, `create({ title, body, client_encrypted })`,
+`append(filename, text, { client_encrypted })`, `remove(id)`,
+`move(id, folderId)`, and `folders()`. Client-side crypto: `encrypt(text,
+passphrase)` / `decrypt(token, passphrase)` (see [Encryption](#encryption)). `note()`/`noteById()`/`create()` return the note object
 directly (no `{ note: … }` wrapper); `notes()` and `folders()` return
 arrays. For `notes()`, `sort` is `created|updated|appended` and
 `folderId` may be a folder id or `"none"` (un-foldered only).
@@ -144,6 +145,50 @@ Stable error codes: `unauthenticated`, `forbidden`, `not_found`,
 `validation_failed`, `cap_exceeded`, `storage_cap_exceeded`,
 `content_too_large`, `content_type_mismatch`, `rate_limited`. Full list:
 <https://freshjots.com/docs>.
+
+## Encryption
+
+Fresh Jots stores whatever text you send, byte-for-byte — so you can keep notes
+the server can't read: encrypt locally with your own passphrase, store the
+ciphertext, decrypt locally on read. The helpers are built in (format `fj1`:
+AES-256-CBC + HMAC-SHA256, PBKDF2, zero dependencies) and interoperate with the
+Python, Ruby, MCP, and shell (`brew`) clients.
+
+```js
+import { Client, encrypt, decrypt } from "freshjots";
+
+const client = new Client();
+const pass = process.env.FRESHJOTS_PASSPHRASE;
+
+// Store an encrypted note: encrypt the body, flag it client_encrypted.
+await client.create({ title: "Recovery codes", body: encrypt("1234-5678", pass), client_encrypted: true });
+
+// Read it back and decrypt locally.
+const note = await client.note("recovery-codes");
+console.log(decrypt(note.plain_body, pass));
+```
+
+From the CLI, `--encrypt` / `--decrypt` do the same, reading the passphrase
+from `FRESHJOTS_PASSPHRASE`:
+
+```sh
+export FRESHJOTS_PASSPHRASE='correct horse battery staple'
+freshjots create "Recovery codes" --body "1234-5678" --encrypt
+freshjots cat recovery-codes --decrypt
+
+# An encrypted log stream — one ciphertext line per event:
+freshjots append deploys "shipped v2" --encrypt
+
+# Standalone: pipe anything through encrypt / decrypt.
+echo "secret" | freshjots encrypt          # -> fj1:…
+printf 'fj1:…' | freshjots decrypt         # -> secret
+```
+
+You hold the only key. Fresh Jots never receives it and **cannot recover the
+note if you lose it** — back the passphrase up somewhere safe. Encryption is
+per-note and personal-only (not team notes); the note's title and metadata stay
+in the clear, so keep secrets out of the title. See
+<https://freshjots.com/encrypted-notes>.
 
 ## Auth
 

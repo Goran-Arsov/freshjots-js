@@ -21,6 +21,11 @@
 export const VERSION = "1.0.2";
 const DEFAULT_BASE_URL = "https://freshjots.com/api/v1";
 
+// Client-side encryption helpers (format "fj1", interoperable with the Python
+// and Ruby clients). Encrypt locally, store the ciphertext as a note body with
+// { client_encrypted: true }, decrypt locally on read.
+export { encrypt, decrypt, isEncrypted } from "./crypto.js";
+
 export class ApiError extends Error {
   constructor({ status, code, message, details }) {
     super(message);
@@ -95,7 +100,11 @@ export class Client {
   // (the by-filename endpoint creates it with that exact name on first
   // call). Returns the created note (top level); read `.filename` for
   // the server-derived stream name.
-  async create({ title, body = "" }) {
+  // Pass `client_encrypted: true` to mark the note as a client-encrypted note
+  // — `body` is opaque ciphertext you produced with encrypt(); the server
+  // stores it verbatim and never reads it. Personal accounts only; immutable
+  // after creation.
+  async create({ title, body = "", client_encrypted = false }) {
     if (!title) {
       throw new Error(
         "create requires a title — the API derives the filename from it. " +
@@ -103,12 +112,18 @@ export class Client {
       );
     }
     const note = { title, plain_body: body, format: "plain" };
+    if (client_encrypted) note.client_encrypted = true;
     return await this._request("POST", "/notes", { note });
   }
 
-  async append(filename, text) {
+  // On first-touch creation, pass `{ client_encrypted: true }` to open the
+  // stream as a client-encrypted note (send one ciphertext line per append).
+  // Ignored once the note exists — encryption is set at create.
+  async append(filename, text, { client_encrypted = false } = {}) {
     const path = `/notes/by-filename/${encodeURIComponent(filename)}/append`;
-    await this._request("POST", path, { text });
+    const body = { text };
+    if (client_encrypted) body.client_encrypted = true;
+    await this._request("POST", path, body);
     return true;
   }
 
