@@ -73,8 +73,8 @@ export class Client {
     return await this._request("GET", `/notes/${encodeURIComponent(id)}`);
   }
 
-  // Delete a note by id. Locked (append-only) notes are refused by the
-  // API with note_locked. Returns true on success (204).
+  // Delete a note by id. Works on any note, including locked (append-only)
+  // ones — the lock freezes content, not deletability. Returns true (204).
   async remove(id) {
     await this._request("DELETE", `/notes/${encodeURIComponent(id)}`);
     return true;
