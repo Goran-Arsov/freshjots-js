@@ -311,6 +311,12 @@ async function resolveFolderName(client, name) {
   return matches[0].id;
 }
 
+// Group an integer with thousands separators ("3145719" -> "3,145,719"),
+// matching the byte-count formatting the bash CLI produces via jq.
+function groupThousands(n) {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
 function printNotes(notes, long, stdout) {
   for (const n of notes) {
     const title = n.title ?? "(untitled)";
@@ -445,15 +451,16 @@ export async function run(argv, deps = {}) {
         stderr("Error: append requires text (as an argument or on stdin)\n");
         return 2;
       }
-      if (parsed.encrypt) {
-        await client.append(parsed.filename, encrypt(text, getPassphrase(env)), { client_encrypted: true });
-      } else {
-        await client.append(parsed.filename, text);
-      }
+      const res = parsed.encrypt
+        ? await client.append(parsed.filename, encrypt(text, getPassphrase(env)), { client_encrypted: true })
+        : await client.append(parsed.filename, text);
+      stdout(`${res.created ? "created" : "appended to"} #${res.id} ${res.filename} — ${groupThousands(res.bytes_remaining)} bytes remaining\n`);
       return 0;
     }
     if (parsed.command === "rm") {
-      await client.remove(await resolveNoteId(client, parsed.target));
+      const id = await resolveNoteId(client, parsed.target);
+      await client.remove(id);
+      stdout(`deleted #${id}\n`);
       return 0;
     }
     if (parsed.command === "mv") {
@@ -463,6 +470,7 @@ export async function run(argv, deps = {}) {
       else if (isNumeric(parsed.dest)) folderId = parsed.dest;
       else folderId = await resolveFolderName(client, parsed.dest);
       await client.move(id, folderId);
+      stdout(`moved #${id} -> folder ${folderId ?? "root"}\n`);
       return 0;
     }
     if (parsed.command === "folders") {
@@ -481,7 +489,8 @@ export async function run(argv, deps = {}) {
     }
     if (parsed.command === "folder-rm") {
       await client.deleteFolder(parsed.id);
-      return 0; // silent, like `rm`
+      stdout(`deleted folder #${parsed.id}\n`);
+      return 0;
     }
     if (parsed.command === "folder-show") {
       stdout(`${JSON.stringify(await client.folder(parsed.id), null, 2)}\n`);

@@ -115,11 +115,11 @@ test("create() posts note.title (never filename) and returns the created note", 
   }
 });
 
-test("append() posts { text } to the by-filename append path", async () => {
+test("append() posts { text } to the by-filename append path and returns the envelope", async () => {
   const { calls, restore } = stubFetch({ ok: true, status: 200, body: { id: 1, created: false } });
   try {
-    const ok = await new Client({ token: "mn_x" }).append("deploys", "shipped");
-    assert.equal(ok, true);
+    const res = await new Client({ token: "mn_x" }).append("deploys", "shipped");
+    assert.deepEqual(res, { id: 1, created: false });
     assert.match(calls[0][0], /\/notes\/by-filename\/deploys\/append$/);
     assert.equal(JSON.parse(calls[0][1].body).text, "shipped");
   } finally {

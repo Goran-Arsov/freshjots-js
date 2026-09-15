@@ -149,8 +149,9 @@ export class Client {
     const path = `/notes/by-filename/${encodeURIComponent(filename)}/append`;
     const body = { text };
     if (client_encrypted) body.client_encrypted = true;
-    await this._request("POST", path, body);
-    return true;
+    // Return the parsed append envelope (created flag, id, filename,
+    // bytes_remaining) so callers like the CLI can print a receipt.
+    return await this._request("POST", path, body);
   }
 
   // Update a note by numeric id (PATCH /notes/:id, body { note: attrs }).

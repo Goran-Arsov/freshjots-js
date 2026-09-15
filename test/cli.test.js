@@ -9,7 +9,7 @@ import { Readable } from "node:stream";
 import { ApiError, VERSION } from "../index.js";
 import { parseArgs, run } from "../cli.js";
 
-function harness({ token = "mn_test", stdin, readFile } = {}) {
+function harness({ token = "mn_test", stdin, readFile, appendResult } = {}) {
   const out = [];
   const err = [];
   const calls = [];
@@ -18,7 +18,7 @@ function harness({ token = "mn_test", stdin, readFile } = {}) {
     note: async (filename) => { calls.push(["note", filename]); return { id: 7, filename, title: "T", plain_body: "hello world" }; },
     noteById: async (id) => { calls.push(["noteById", id]); return { id, filename: "byid", title: "T", plain_body: "by id body" }; },
     create: async (input) => { calls.push(["create", input]); return { id: 1, filename: "derived-slug", title: input.title, plain_body: input.body ?? "" }; },
-    append: async (filename, text) => { calls.push(["append", filename, text]); return true; },
+    append: async (filename, text) => { calls.push(["append", filename, text]); return appendResult ?? { created: false, id: 7, filename, bytes_remaining: 3145719 }; },
     remove: async (id) => { calls.push(["remove", id]); return true; },
     move: async (id, folderId) => { calls.push(["move", id, folderId]); return { id, folder_id: folderId }; },
     folders: async () => { calls.push(["folders"]); return [{ id: 3, name: "Work" }, { id: 4, name: "Archive" }]; },
@@ -276,6 +276,7 @@ test("run: rm by id calls remove directly", async () => {
   const code = await run(["rm", "42"], h.deps);
   assert.equal(code, 0);
   assert.deepEqual(h.calls[0], ["remove", "42"]);
+  assert.equal(h.out(), "deleted #42\n");
 });
 
 test("run: rm by name resolves to an id first", async () => {
@@ -283,6 +284,7 @@ test("run: rm by name resolves to an id first", async () => {
   await run(["rm", "my-note"], h.deps);
   assert.deepEqual(h.calls[0], ["note", "my-note"]); // resolve
   assert.deepEqual(h.calls[1], ["remove", 7]);       // note().id
+  assert.equal(h.out(), "deleted #7\n");
 });
 
 test("run: mv to a folder by name resolves both note and folder", async () => {
@@ -291,12 +293,14 @@ test("run: mv to a folder by name resolves both note and folder", async () => {
   assert.deepEqual(h.calls[0], ["note", "my-note"]); // note -> id 7
   assert.deepEqual(h.calls[1], ["folders"]);          // Work -> id 3
   assert.deepEqual(h.calls[2], ["move", 7, 3]);
+  assert.equal(h.out(), "moved #7 -> folder 3\n");
 });
 
 test("run: mv --root moves to the root (null folder)", async () => {
   const h = harness();
   await run(["mv", "42", "--root"], h.deps);
   assert.deepEqual(h.calls[0], ["move", "42", null]);
+  assert.equal(h.out(), "moved #42 -> folder root\n");
 });
 
 test("run: folders prints `id\\tname` per row", async () => {
@@ -327,12 +331,12 @@ test("run: folder rename prints the renamed confirmation", async () => {
   assert.equal(h.out(), "renamed folder #9 -> Operations\n");
 });
 
-test("run: folder rm deletes silently", async () => {
+test("run: folder rm prints a confirmation", async () => {
   const h = harness();
   const code = await run(["folder", "rm", "9"], h.deps);
   assert.equal(code, 0);
   assert.deepEqual(h.calls[0], ["deleteFolder", "9"]);
-  assert.equal(h.out(), "");
+  assert.equal(h.out(), "deleted folder #9\n");
 });
 
 test("run: folder <id> prints the folder as JSON", async () => {
@@ -415,11 +419,19 @@ test("run: create reads body from stdin when --body is omitted", async () => {
   assert.deepEqual(h.calls[0], ["create", { title: "Piped", body: "piped body" }]);
 });
 
-test("run: append with text arg forwards verbatim", async () => {
+test("run: append with text arg forwards verbatim and prints a receipt", async () => {
   const h = harness();
   const code = await run(["append", "log", "shipped"], h.deps);
   assert.equal(code, 0);
   assert.deepEqual(h.calls[0], ["append", "log", "shipped"]);
+  assert.equal(h.out(), "appended to #7 log — 3,145,719 bytes remaining\n");
+});
+
+test("run: append prints `created` on first touch, no comma for small numbers", async () => {
+  const h = harness({ appendResult: { created: true, id: 12, filename: "new-log", bytes_remaining: 500 } });
+  const code = await run(["append", "new-log", "hi"], h.deps);
+  assert.equal(code, 0);
+  assert.equal(h.out(), "created #12 new-log — 500 bytes remaining\n");
 });
 
 test("run: append reads text from stdin when arg omitted", async () => {
