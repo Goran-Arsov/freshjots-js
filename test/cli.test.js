@@ -91,8 +91,12 @@ test("parseArgs: create accepts title with --body, -b, --body=value", () => {
   assert.deepEqual(parseArgs(["create", "Title", "--body", "x"]), { command: "create", title: "Title", body: "x", encrypt: false });
   assert.deepEqual(parseArgs(["create", "Title", "-b", "x"]), { command: "create", title: "Title", body: "x", encrypt: false });
   assert.deepEqual(parseArgs(["create", "Title", "--body=x"]), { command: "create", title: "Title", body: "x", encrypt: false });
+  // Positional body (matches the docs and the bash CLI).
+  assert.deepEqual(parseArgs(["create", "Title", "body text"]), { command: "create", title: "Title", body: "body text", encrypt: false });
   assert.equal(parseArgs(["create"]).command, "error");
   assert.equal(parseArgs(["create", "Title", "--body"]).command, "error");
+  assert.equal(parseArgs(["create", "Title", "a", "b"]).command, "error");            // too many positionals
+  assert.equal(parseArgs(["create", "Title", "pos", "--body", "flag"]).command, "error"); // positional + --body conflict
 });
 
 test("parseArgs: append accepts filename + optional text", () => {
@@ -404,11 +408,11 @@ test("run: bulk on invalid JSON returns 2", async () => {
   assert.match(h.err(), /not valid JSON/);
 });
 
-test("run: create with --body forwards title+body and prints derived filename", async () => {
+test("run: create with --body forwards title+body and prints `created #id filename`", async () => {
   const h = harness();
   const code = await run(["create", "My Title", "--body", "first line"], h.deps);
   assert.equal(code, 0);
-  assert.equal(h.out(), "derived-slug\n");
+  assert.equal(h.out(), "created #1 derived-slug\n");
   assert.deepEqual(h.calls[0], ["create", { title: "My Title", body: "first line" }]);
 });
 
@@ -447,6 +451,37 @@ test("run: append with no arg and no stdin returns 2", async () => {
   assert.equal(code, 2);
   assert.match(h.err(), /append requires text/);
   assert.equal(h.calls.length, 0);
+});
+
+test("run: create with a positional body forwards title+body", async () => {
+  const h = harness();
+  const code = await run(["create", "My Title", "first line"], h.deps);
+  assert.equal(code, 0);
+  assert.deepEqual(h.calls[0], ["create", { title: "My Title", body: "first line" }]);
+  assert.equal(h.out(), "created #1 derived-slug\n");
+});
+
+test("run: -q suppresses a write confirmation but still performs the write", async () => {
+  const h = harness();
+  const code = await run(["rm", "42", "-q"], h.deps);
+  assert.equal(code, 0);
+  assert.deepEqual(h.calls[0], ["remove", "42"]); // the delete still happened
+  assert.equal(h.out(), "");                       // …silently
+});
+
+test("run: --quiet before the command also suppresses the receipt", async () => {
+  const h = harness();
+  const code = await run(["--quiet", "append", "log", "x"], h.deps);
+  assert.equal(code, 0);
+  assert.deepEqual(h.calls[0], ["append", "log", "x"]);
+  assert.equal(h.out(), "");
+});
+
+test("run: -q does NOT suppress data commands (ls still lists)", async () => {
+  const h = harness();
+  const code = await run(["ls", "-q"], h.deps);
+  assert.equal(code, 0);
+  assert.equal(h.out(), "1\ta\tAlpha\n2\tb\tBeta\n");
 });
 
 test("run: ApiError from client is formatted with status + code + message", async () => {

@@ -24,8 +24,8 @@ function stubFetch(respond) {
   return { calls, restore: () => { globalThis.fetch = original; } };
 }
 
-test("VERSION is pinned to 1.2.0", () => {
-  assert.equal(VERSION, "1.2.0");
+test("VERSION is pinned to 2.0.0", () => {
+  assert.equal(VERSION, "2.0.0");
 });
 
 test("Client throws when no token is available", () => {

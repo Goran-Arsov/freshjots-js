@@ -193,7 +193,13 @@ export function parseArgs(argv) {
         positional.push(a);
       }
     }
-    if (positional.length !== 1) return errResult("create requires exactly one <title>");
+    if (positional.length < 1 || positional.length > 2) {
+      return errResult("create requires <title> and an optional <body>");
+    }
+    if (positional.length === 2) {
+      if (body !== undefined) return errResult("create: pass the body positionally or with --body, not both");
+      body = positional[1];
+    }
     return { command: "create", title: positional[0], body, encrypt };
   }
   if (first === "append") {
@@ -337,7 +343,15 @@ export async function run(argv, deps = {}) {
   const clientFactory = deps.clientFactory ?? ((token) => new Client({ token }));
   const readFileText = deps.readFile ?? ((p) => readFile(p, "utf8"));
 
-  const parsed = parseArgs(argv);
+  // Global -q/--quiet, stripped before parsing: suppresses the success
+  // confirmation on write commands (create/append/update/set/rm/mv/bulk and
+  // the folder writes) for log-streaming loops. Data commands (ls/cat/get/
+  // folders/folder <id>) print their result regardless. Errors still go to stderr.
+  const quiet = argv.includes("-q") || argv.includes("--quiet");
+  const args = argv.filter((a) => a !== "-q" && a !== "--quiet");
+  const say = quiet ? () => {} : stdout;
+
+  const parsed = parseArgs(args);
 
   if (parsed.command === "help") {
     (parsed.exitCode ? stderr : stdout)(USAGE);
@@ -441,7 +455,7 @@ export async function run(argv, deps = {}) {
         input.client_encrypted = true;
       }
       const created = await client.create(input);
-      stdout(`${created.filename}\n`);
+      say(`created #${created.id} ${created.filename}\n`);
       return 0;
     }
     if (parsed.command === "append") {
@@ -454,13 +468,13 @@ export async function run(argv, deps = {}) {
       const res = parsed.encrypt
         ? await client.append(parsed.filename, encrypt(text, getPassphrase(env)), { client_encrypted: true })
         : await client.append(parsed.filename, text);
-      stdout(`${res.created ? "created" : "appended to"} #${res.id} ${res.filename} — ${groupThousands(res.bytes_remaining)} bytes remaining\n`);
+      say(`${res.created ? "created" : "appended to"} #${res.id} ${res.filename} — ${groupThousands(res.bytes_remaining)} bytes remaining\n`);
       return 0;
     }
     if (parsed.command === "rm") {
       const id = await resolveNoteId(client, parsed.target);
       await client.remove(id);
-      stdout(`deleted #${id}\n`);
+      say(`deleted #${id}\n`);
       return 0;
     }
     if (parsed.command === "mv") {
@@ -470,7 +484,7 @@ export async function run(argv, deps = {}) {
       else if (isNumeric(parsed.dest)) folderId = parsed.dest;
       else folderId = await resolveFolderName(client, parsed.dest);
       await client.move(id, folderId);
-      stdout(`moved #${id} -> folder ${folderId ?? "root"}\n`);
+      say(`moved #${id} -> folder ${folderId ?? "root"}\n`);
       return 0;
     }
     if (parsed.command === "folders") {
@@ -479,17 +493,17 @@ export async function run(argv, deps = {}) {
     }
     if (parsed.command === "folder-create") {
       const f = await client.createFolder(parsed.name);
-      stdout(`created folder #${f.id} ${f.name}\n`);
+      say(`created folder #${f.id} ${f.name}\n`);
       return 0;
     }
     if (parsed.command === "folder-rename") {
       const f = await client.renameFolder(parsed.id, parsed.name);
-      stdout(`renamed folder #${f.id} -> ${f.name}\n`);
+      say(`renamed folder #${f.id} -> ${f.name}\n`);
       return 0;
     }
     if (parsed.command === "folder-rm") {
       await client.deleteFolder(parsed.id);
-      stdout(`deleted folder #${parsed.id}\n`);
+      say(`deleted folder #${parsed.id}\n`);
       return 0;
     }
     if (parsed.command === "folder-show") {
@@ -502,7 +516,7 @@ export async function run(argv, deps = {}) {
       const note = parsed.command === "update"
         ? await client.update(parsed.id, attrs)
         : await client.set(parsed.filename, attrs);
-      stdout(parsed.command === "update"
+      say(parsed.command === "update"
         ? `updated #${note.id} ${note.filename}\n`
         : `updated ${note.filename}\n`);
       return 0;
@@ -537,7 +551,7 @@ export async function run(argv, deps = {}) {
         return 2;
       }
       const res = await client.bulk(notes);
-      stdout(`created ${res.created.length} notes\n`);
+      say(`created ${res.created.length} notes\n`);
       return 0;
     }
   } catch (e) {
