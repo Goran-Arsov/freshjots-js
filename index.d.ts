@@ -105,6 +105,35 @@ declare module "freshjots" {
     client_encrypted?: boolean;
   }
 
+  /**
+   * Fields accepted by `update()` and `set()`. Only the keys you pass are
+   * changed. A title/plain_body change rewrites the body as a unit and needs a
+   * non-empty `plain_body`. `folder_id: null` un-folders the note.
+   */
+  export interface NoteUpdate {
+    title?: string;
+    plain_body?: string;
+    folder_id?: number | null;
+    append_deadline_hours?: number | null;
+    alert_email?: string | null;
+    webhook_url?: string | null;
+    webhook_secret?: string | null;
+  }
+
+  /** A note object accepted by `bulk()` (same shape the server takes for create). */
+  export interface BulkNoteInput {
+    title: string;
+    plain_body?: string;
+    folder_id?: number | null;
+    client_encrypted?: boolean;
+    [key: string]: unknown;
+  }
+
+  /** Result of `bulk()` — the created notes, atomically inserted. */
+  export interface BulkResult {
+    created: Note[];
+  }
+
   export class Client {
     token: string;
     baseUrl: string;
@@ -114,8 +143,15 @@ declare module "freshjots" {
     noteById(id: number | string): Promise<Note>;
     create(input: CreateInput): Promise<Note>;
     append(filename: string, text: string, options?: AppendOptions): Promise<true>;
+    update(id: number | string, attrs: NoteUpdate): Promise<Note>;
+    set(filename: string, attrs: NoteUpdate): Promise<Note>;
+    bulk(notes: BulkNoteInput[]): Promise<BulkResult>;
     remove(id: number | string): Promise<true>;
     move(id: number | string, folderId: number | string | null): Promise<Note>;
     folders(): Promise<Folder[]>;
+    folder(id: number | string): Promise<Folder>;
+    createFolder(name: string): Promise<Folder>;
+    renameFolder(id: number | string, name: string): Promise<Folder>;
+    deleteFolder(id: number | string): Promise<true>;
   }
 }

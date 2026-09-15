@@ -3,6 +3,7 @@
 // stays import-safe and testable: parseArgs is pure, run takes its I/O
 // surface as deps so tests can stub stdin/stdout/stderr and the Client.
 
+import { readFile } from "node:fs/promises";
 import { Client, ApiError, VERSION, encrypt, decrypt, isEncrypted } from "./index.js";
 
 const USAGE = `freshjots — Fresh Jots CLI
@@ -18,12 +19,32 @@ Usage:
   freshjots cat <id|filename> [--decrypt]   Print a note's body.
   freshjots create <title> [--body <text>] [--encrypt]
   freshjots append <filename> [<text>] [--encrypt]
+  freshjots update <id> [flags]        Update a note by id (see Update flags).
+  freshjots set <filename> [flags]     Update a note by filename (see Update flags).
   freshjots rm <id|filename>           Delete a note.
   freshjots mv <id|filename> <folder-id|name|--root>
+  freshjots bulk [file.json]           Bulk-create notes (JSON array/{notes:[…]}
+                                         on stdin or from a file; max 50).
   freshjots folders                    List folders as id<TAB>name.
+  freshjots folder <subcommand>        Manage folders:
+                                         folder [ls]                list (same as 'folders')
+                                         folder create <name>       create a folder
+                                         folder rename <id> <name>  rename a folder
+                                         folder rm <id>             delete a folder (notes survive)
+                                         folder <id>                show one folder as JSON
   freshjots encrypt                    Encrypt stdin, print an fj1: token.
   freshjots decrypt                    Decrypt fj1: lines from stdin to plaintext.
   freshjots --help | --version
+
+Update flags (update / set) — only the fields you pass are changed:
+  --title <s>              new title (a title change rewrites the body,
+                             so pass --body too)
+  --body <text> | -        new body (- reads the body from stdin)
+  --folder <id> | --root   move into a folder (numeric id) or un-folder
+  --deadline <hours>       dead-man's-switch deadline
+  --alert-email <s>        dead-man alert address
+  --webhook-url <s>        outbound webhook URL
+  --webhook-secret <s>     outbound webhook signing secret
 
 Notes:
   - <text> for append and --body for create may also be piped on stdin.
@@ -36,6 +57,75 @@ Notes:
 
 const isNumeric = (s) => /^\d+$/.test(s);
 const errResult = (message) => ({ command: "error", message });
+
+// Parse the shared `update` / `set` flags into a { note: attrs } payload.
+// Mirrors the bash CLI's build_note_body: only keys the caller passed are
+// included, so a PATCH never clobbers an unmentioned field. `-` marks the body
+// as coming from stdin (resolved by run()). Returns { attrs, bodyFromStdin } or
+// { error }. `append_only` / `format` are intentionally absent — the API does
+// not update them.
+function parseNoteAttrs(args) {
+  const attrs = {};
+  let bodyFromStdin = false;
+  let hasTitle = false;
+  let hasBody = false;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    const value = () => (i + 1 < args.length ? args[++i] : undefined);
+    if (a === "--title") {
+      const v = value();
+      if (v === undefined) return { error: "--title requires a value" };
+      attrs.title = v; hasTitle = true;
+    } else if (a === "--body" || a === "-b") {
+      const v = value();
+      if (v === undefined) return { error: "--body requires a value" };
+      attrs.plain_body = v; hasBody = true;
+    } else if (a === "-") {
+      bodyFromStdin = true; hasBody = true;
+    } else if (a === "--folder") {
+      const v = value();
+      if (v === undefined) return { error: "--folder requires a value" };
+      if (!isNumeric(v)) return { error: "--folder requires a numeric folder id (or use --root)" };
+      attrs.folder_id = Number(v);
+    } else if (a === "--root") {
+      attrs.folder_id = null;
+    } else if (a === "--deadline") {
+      const v = value();
+      if (v === undefined) return { error: "--deadline requires a value" };
+      if (!isNumeric(v)) return { error: "--deadline requires a number of hours" };
+      attrs.append_deadline_hours = Number(v);
+    } else if (a === "--alert-email") {
+      const v = value();
+      if (v === undefined) return { error: "--alert-email requires a value" };
+      attrs.alert_email = v;
+    } else if (a === "--webhook-url") {
+      const v = value();
+      if (v === undefined) return { error: "--webhook-url requires a value" };
+      attrs.webhook_url = v;
+    } else if (a === "--webhook-secret") {
+      const v = value();
+      if (v === undefined) return { error: "--webhook-secret requires a value" };
+      attrs.webhook_secret = v;
+    } else {
+      return { error: `unknown flag: ${a} (append_only/format are not API-updatable)` };
+    }
+  }
+  if (Object.keys(attrs).length === 0 && !bodyFromStdin) {
+    return { error: "no fields to update. See 'freshjots --help'." };
+  }
+  // A content PATCH (title/plain_body) rewrites the body as a unit and the API
+  // requires a non-empty plain_body, so a title-only change 422s. Refuse it
+  // here with actionable guidance instead of making a doomed call.
+  if (hasTitle && !hasBody) {
+    return {
+      error:
+        "can't change the title alone: a content update rewrites the body too, so pass " +
+        "--body (or '-'). For metadata-only changes use --folder/--root/--deadline/" +
+        "--alert-email/--webhook-url/--webhook-secret (no body needed).",
+    };
+  }
+  return { attrs, bodyFromStdin };
+}
 
 export function parseArgs(argv) {
   if (argv.length === 0) return { command: "help", exitCode: 2 };
@@ -130,6 +220,46 @@ export function parseArgs(argv) {
     if (rest.length) return errResult("folders takes no arguments");
     return { command: "folders" };
   }
+  if (first === "folder") {
+    const sub = rest[0];
+    if (sub === undefined || sub === "ls" || sub === "list") {
+      if (rest.length > 1) return errResult("usage: freshjots folder ls");
+      return { command: "folders" }; // 'folder ls' is an alias for 'folders'
+    }
+    if (sub === "create" || sub === "new") {
+      if (rest.length !== 2 || !rest[1]) return errResult("usage: freshjots folder create <name>");
+      return { command: "folder-create", name: rest[1] };
+    }
+    if (sub === "rename") {
+      if (rest.length !== 3 || !rest[1] || !rest[2]) return errResult("usage: freshjots folder rename <id> <new-name>");
+      return { command: "folder-rename", id: rest[1], name: rest[2] };
+    }
+    if (sub === "rm" || sub === "delete") {
+      if (rest.length !== 2 || !rest[1]) return errResult("usage: freshjots folder rm <id>");
+      return { command: "folder-rm", id: rest[1] };
+    }
+    // `folder <id>` — show one folder. Name resolution stays on ls/mv only.
+    if (rest.length !== 1) return errResult("usage: freshjots folder <id>");
+    return { command: "folder-show", id: sub };
+  }
+  if (first === "update") {
+    if (rest.length < 1) return errResult("update requires <note-id> and at least one field flag");
+    const parsed = parseNoteAttrs(rest.slice(1));
+    if (parsed.error) return errResult(parsed.error);
+    return { command: "update", id: rest[0], attrs: parsed.attrs, bodyFromStdin: parsed.bodyFromStdin };
+  }
+  if (first === "set") {
+    if (rest.length < 1) return errResult("set requires <filename> and at least one field flag");
+    const parsed = parseNoteAttrs(rest.slice(1));
+    if (parsed.error) return errResult(parsed.error);
+    return { command: "set", filename: rest[0], attrs: parsed.attrs, bodyFromStdin: parsed.bodyFromStdin };
+  }
+  if (first === "bulk") {
+    // An optional file path; "-" or nothing means read JSON from stdin.
+    const files = rest.filter((a) => a !== "-");
+    if (files.length > 1) return errResult("usage: freshjots bulk [file.json] (or pipe JSON on stdin)");
+    return { command: "bulk", file: files[0] }; // undefined -> stdin
+  }
   if (first === "encrypt" || first === "decrypt") {
     if (rest.length) return errResult(`${first} takes no arguments (reads stdin)`);
     return { command: first };
@@ -199,6 +329,7 @@ export async function run(argv, deps = {}) {
   const stderr = deps.stderr ?? ((s) => process.stderr.write(s));
   const stdin = deps.stdin ?? process.stdin;
   const clientFactory = deps.clientFactory ?? ((token) => new Client({ token }));
+  const readFileText = deps.readFile ?? ((p) => readFile(p, "utf8"));
 
   const parsed = parseArgs(argv);
 
@@ -336,6 +467,68 @@ export async function run(argv, deps = {}) {
     }
     if (parsed.command === "folders") {
       for (const f of await client.folders()) stdout(`${f.id}\t${f.name}\n`);
+      return 0;
+    }
+    if (parsed.command === "folder-create") {
+      const f = await client.createFolder(parsed.name);
+      stdout(`created folder #${f.id} ${f.name}\n`);
+      return 0;
+    }
+    if (parsed.command === "folder-rename") {
+      const f = await client.renameFolder(parsed.id, parsed.name);
+      stdout(`renamed folder #${f.id} -> ${f.name}\n`);
+      return 0;
+    }
+    if (parsed.command === "folder-rm") {
+      await client.deleteFolder(parsed.id);
+      return 0; // silent, like `rm`
+    }
+    if (parsed.command === "folder-show") {
+      stdout(`${JSON.stringify(await client.folder(parsed.id), null, 2)}\n`);
+      return 0;
+    }
+    if (parsed.command === "update" || parsed.command === "set") {
+      const attrs = { ...parsed.attrs };
+      if (parsed.bodyFromStdin) attrs.plain_body = await readStdin(stdin);
+      const note = parsed.command === "update"
+        ? await client.update(parsed.id, attrs)
+        : await client.set(parsed.filename, attrs);
+      stdout(parsed.command === "update"
+        ? `updated #${note.id} ${note.filename}\n`
+        : `updated ${note.filename}\n`);
+      return 0;
+    }
+    if (parsed.command === "bulk") {
+      let raw;
+      if (parsed.file !== undefined) {
+        raw = await readFileText(parsed.file);
+      } else {
+        raw = await readStdin(stdin);
+        if (!raw) {
+          stderr("Error: bulk reads a JSON array of notes from a file arg or stdin\n");
+          return 2;
+        }
+      }
+      let json;
+      try {
+        json = JSON.parse(raw);
+      } catch (e) {
+        stderr(`Error: bulk input is not valid JSON: ${e.message}\n`);
+        return 2;
+      }
+      let notes;
+      if (Array.isArray(json)) notes = json;
+      else if (json && Array.isArray(json.notes)) notes = json.notes;
+      else {
+        stderr('Error: bulk expects a JSON array of notes, or {"notes":[...]}\n');
+        return 2;
+      }
+      if (notes.length > 50) {
+        stderr(`Error: max 50 notes per batch (got ${notes.length}). Split the input.\n`);
+        return 2;
+      }
+      const res = await client.bulk(notes);
+      stdout(`created ${res.created.length} notes\n`);
       return 0;
     }
   } catch (e) {

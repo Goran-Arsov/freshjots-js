@@ -30,11 +30,24 @@ freshjots get 42                          # full note as JSON
 freshjots cat cron-jobs-prod              # note body, by id or filename
 freshjots create "Research 2026 Q2"       # body from stdin or --body
 freshjots append cron-jobs-prod "ok"      # text may also be piped on stdin
+freshjots update 42 --title "Q2" --body … # update a note by id (only the fields you pass)
+freshjots set cron-jobs-prod --deadline 26 # update a note by filename (metadata-only shown)
 freshjots rm cron-jobs-prod               # delete by id or filename
 freshjots mv cron-jobs-prod Work          # move into a folder (id or name); --root to un-folder
+freshjots bulk notes.json                 # create many notes atomically (JSON array; stdin or file)
 freshjots folders                         # prints "<id>\t<name>" per row
+freshjots folder create "Ops"             # create a folder
+freshjots folder rename 3 "Operations"    # rename by id
+freshjots folder rm 3                      # delete by id (its notes survive, un-foldered)
 freshjots --version                       # print version (--help for full usage)
 ```
+
+`update` and `set` change only the flags you pass, so an unmentioned
+field is never clobbered. A title change rewrites the body as a unit, so
+pass `--body` (or `-` to read it from stdin) alongside `--title`;
+metadata-only changes (`--folder`/`--root`, `--deadline`, `--alert-email`,
+`--webhook-url`, `--webhook-secret`) need no body. Run `freshjots --help`
+for the full flag list.
 
 Both `create` and `append` read from stdin when the body or text isn't
 passed as an argument, so the usual pipe patterns work:
@@ -90,11 +103,18 @@ console.log(created.filename); // server-derived stream name
 
 Client methods: `notes({ sort, folderId, limit, offset })`,
 `note(filename)`, `noteById(id)`, `create({ title, body, client_encrypted })`,
-`append(filename, text, { client_encrypted })`, `remove(id)`,
-`move(id, folderId)`, and `folders()`. Client-side crypto: `encrypt(text,
-passphrase)` / `decrypt(token, passphrase)` (see [Encryption](#encryption)). `note()`/`noteById()`/`create()` return the note object
-directly (no `{ note: … }` wrapper); `notes()` and `folders()` return
-arrays. For `notes()`, `sort` is `created|updated|appended` and
+`append(filename, text, { client_encrypted })`, `update(id, attrs)`,
+`set(filename, attrs)`, `bulk(notes)`, `remove(id)`, `move(id, folderId)`,
+`folders()`, `folder(id)`, `createFolder(name)`, `renameFolder(id, name)`,
+and `deleteFolder(id)`. Client-side crypto: `encrypt(text,
+passphrase)` / `decrypt(token, passphrase)` (see [Encryption](#encryption)). `note()`/`noteById()`/`create()`/`update()`/`set()` and the single-folder
+methods return the object directly (no `{ note: … }` / `{ folder: … }`
+wrapper); `notes()` and `folders()` return arrays, and `bulk()` returns
+`{ created: [...] }`. For `update()`/`set()`, `attrs` carries only the
+fields to change (`title`, `plain_body`, `folder_id` — `null` to un-folder —
+`append_deadline_hours`, `alert_email`, `webhook_url`, `webhook_secret`);
+`deleteFolder()` leaves the folder's notes in place (they become un-foldered).
+For `notes()`, `sort` is `created|updated|appended` and
 `folderId` may be a folder id or `"none"` (un-foldered only).
 
 ## TypeScript

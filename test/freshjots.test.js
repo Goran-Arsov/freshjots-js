@@ -24,8 +24,8 @@ function stubFetch(respond) {
   return { calls, restore: () => { globalThis.fetch = original; } };
 }
 
-test("VERSION is pinned to 1.1.0", () => {
-  assert.equal(VERSION, "1.1.0");
+test("VERSION is pinned to 1.2.0", () => {
+  assert.equal(VERSION, "1.2.0");
 });
 
 test("Client throws when no token is available", () => {
@@ -211,6 +211,94 @@ test("folders unwraps the { folders: [...] } envelope", async () => {
   try {
     const folders = await new Client({ token: "mn_x" }).folders();
     assert.equal(folders[0].name, "Work");
+  } finally {
+    restore();
+  }
+});
+
+test("folder(id) reads /folders/:id at the top level (no wrapper)", async () => {
+  const { calls, restore } = stubFetch({ ok: true, status: 200, body: { id: 3, name: "Work" } });
+  try {
+    const f = await new Client({ token: "mn_x" }).folder(3);
+    assert.equal(f.name, "Work");
+    assert.equal(calls[0][1].method, "GET");
+    assert.match(calls[0][0], /\/folders\/3$/);
+  } finally {
+    restore();
+  }
+});
+
+test("createFolder posts { folder: { name } } and returns the folder", async () => {
+  const { calls, restore } = stubFetch({ ok: true, status: 201, body: { id: 5, name: "Ops" } });
+  try {
+    const f = await new Client({ token: "mn_x" }).createFolder("Ops");
+    assert.equal(f.id, 5);
+    assert.equal(calls[0][1].method, "POST");
+    assert.match(calls[0][0], /\/folders$/);
+    assert.deepEqual(JSON.parse(calls[0][1].body), { folder: { name: "Ops" } });
+  } finally {
+    restore();
+  }
+});
+
+test("renameFolder PATCHes /folders/:id with { folder: { name } }", async () => {
+  const { calls, restore } = stubFetch({ ok: true, status: 200, body: { id: 5, name: "Operations" } });
+  try {
+    const f = await new Client({ token: "mn_x" }).renameFolder(5, "Operations");
+    assert.equal(f.name, "Operations");
+    assert.equal(calls[0][1].method, "PATCH");
+    assert.match(calls[0][0], /\/folders\/5$/);
+    assert.deepEqual(JSON.parse(calls[0][1].body), { folder: { name: "Operations" } });
+  } finally {
+    restore();
+  }
+});
+
+test("deleteFolder sends DELETE /folders/:id and returns true on 204", async () => {
+  const { calls, restore } = stubFetch({ ok: true, status: 204 });
+  try {
+    const ok = await new Client({ token: "mn_x" }).deleteFolder(5);
+    assert.equal(ok, true);
+    assert.equal(calls[0][1].method, "DELETE");
+    assert.match(calls[0][0], /\/folders\/5$/);
+  } finally {
+    restore();
+  }
+});
+
+test("update PATCHes /notes/:id with { note: attrs } and returns the note", async () => {
+  const { calls, restore } = stubFetch({ ok: true, status: 200, body: { id: 42, filename: "log", title: "New" } });
+  try {
+    const note = await new Client({ token: "mn_x" }).update(42, { title: "New", plain_body: "b" });
+    assert.equal(note.id, 42);
+    assert.equal(calls[0][1].method, "PATCH");
+    assert.match(calls[0][0], /\/notes\/42$/);
+    assert.deepEqual(JSON.parse(calls[0][1].body), { note: { title: "New", plain_body: "b" } });
+  } finally {
+    restore();
+  }
+});
+
+test("set PATCHes the by-filename path with { note: attrs }", async () => {
+  const { calls, restore } = stubFetch({ ok: true, status: 200, body: { id: 1, filename: "cron jobs" } });
+  try {
+    await new Client({ token: "mn_x" }).set("cron jobs", { folder_id: 3 });
+    assert.equal(calls[0][1].method, "PATCH");
+    assert.match(calls[0][0], /\/notes\/by-filename\/cron%20jobs$/);
+    assert.deepEqual(JSON.parse(calls[0][1].body), { note: { folder_id: 3 } });
+  } finally {
+    restore();
+  }
+});
+
+test("bulk posts { notes } and returns the { created } envelope", async () => {
+  const { calls, restore } = stubFetch({ ok: true, status: 201, body: { created: [{ id: 1 }, { id: 2 }] } });
+  try {
+    const res = await new Client({ token: "mn_x" }).bulk([{ title: "a" }, { title: "b" }]);
+    assert.equal(res.created.length, 2);
+    assert.equal(calls[0][1].method, "POST");
+    assert.match(calls[0][0], /\/notes\/bulk$/);
+    assert.deepEqual(JSON.parse(calls[0][1].body), { notes: [{ title: "a" }, { title: "b" }] });
   } finally {
     restore();
   }

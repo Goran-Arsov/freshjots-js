@@ -18,7 +18,7 @@
 // payload ({ "notes": [...] }). show / show-by-filename / create return
 // the note object at the TOP LEVEL — there is no { "note": ... } wrapper.
 
-export const VERSION = "1.1.0";
+export const VERSION = "1.2.0";
 const DEFAULT_BASE_URL = "https://freshjots.com/api/v1";
 
 // Client-side encryption helpers (format "fj1", interoperable with the Python
@@ -94,6 +94,32 @@ export class Client {
     return (await this._request("GET", "/folders")).folders;
   }
 
+  // Fetch one folder by id (GET /folders/:id). Like the note reads, the
+  // serializer renders at the top level — no { folder: ... } wrapper.
+  async folder(id) {
+    return await this._request("GET", `/folders/${encodeURIComponent(id)}`);
+  }
+
+  // Create a folder (POST /folders, body { folder: { name } }). Returns the
+  // created folder at the top level (201). A personal token creates a personal
+  // folder, a team token a workspace folder — the server decides from the token.
+  async createFolder(name) {
+    return await this._request("POST", "/folders", { folder: { name } });
+  }
+
+  // Rename a folder (PATCH /folders/:id, body { folder: { name } }). Returns
+  // the updated folder (top level).
+  async renameFolder(id, name) {
+    return await this._request("PATCH", `/folders/${encodeURIComponent(id)}`, { folder: { name } });
+  }
+
+  // Delete a folder by id (DELETE /folders/:id). Its notes survive — the FK
+  // nullifies folder_id, so they just become un-foldered. Returns true (204).
+  async deleteFolder(id) {
+    await this._request("DELETE", `/folders/${encodeURIComponent(id)}`);
+    return true;
+  }
+
   // Create a note. The API permits note[title, plain_body, format, ...]
   // — NOT filename: the server DERIVES the filename from the title. For
   // a note addressable by an exact, caller-chosen filename, use append()
@@ -125,6 +151,33 @@ export class Client {
     if (client_encrypted) body.client_encrypted = true;
     await this._request("POST", path, body);
     return true;
+  }
+
+  // Update a note by numeric id (PATCH /notes/:id, body { note: attrs }).
+  // `attrs` holds only the fields to change — title, plain_body, folder_id
+  // (null to un-folder), append_deadline_hours, alert_email, webhook_url,
+  // webhook_secret — so an unmentioned field is never clobbered. A content
+  // change (title/plain_body) rewrites the body as a unit and requires a
+  // non-empty plain_body. Locked (append-only) notes refuse content edits
+  // with an ApiError (code note_locked); metadata-only changes are allowed.
+  // Returns the full updated note (top level).
+  async update(id, attrs) {
+    return await this._request("PATCH", `/notes/${encodeURIComponent(id)}`, { note: attrs });
+  }
+
+  // Update a note addressed by its exact filename / stream name
+  // (PATCH /notes/by-filename/:filename). Same body and contract as update().
+  async set(filename, attrs) {
+    const path = `/notes/by-filename/${encodeURIComponent(filename)}`;
+    return await this._request("PATCH", path, { note: attrs });
+  }
+
+  // Bulk-create notes in one atomic batch (POST /notes/bulk, body
+  // { notes: [...] }). `notes` is an array of note objects (server cap: 50);
+  // all land or none do. Returns the response envelope { created: [...] } —
+  // read `.created` for the created notes.
+  async bulk(notes) {
+    return await this._request("POST", "/notes/bulk", { notes });
   }
 
   async _request(method, path, body) {
