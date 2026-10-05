@@ -38,7 +38,7 @@ freshjots bulk notes.json                 # create many notes atomically (JSON a
 freshjots folders                         # prints "<id>\t<name>" per row
 freshjots folder create "Ops"             # create a folder
 freshjots folder rename 3 "Operations"    # rename by id
-freshjots folder rm 3                      # delete by id (its notes survive, un-foldered)
+freshjots folder rm 3                      # delete by id (its notes move to the default folder)
 freshjots --version                       # print version (--help for full usage)
 ```
 
@@ -113,7 +113,7 @@ wrapper); `notes()` and `folders()` return arrays, and `bulk()` returns
 `{ created: [...] }`. For `update()`/`set()`, `attrs` carries only the
 fields to change (`title`, `plain_body`, `folder_id` — `null` to un-folder —
 `append_deadline_hours`, `alert_email`, `webhook_url`, `webhook_secret`);
-`deleteFolder()` leaves the folder's notes in place (they become un-foldered).
+`deleteFolder()` moves the folder's notes to the account's built-in `default` folder.
 For `notes()`, `sort` is `created|updated|appended` and
 `folderId` may be a folder id or `"none"` (un-foldered only).
 
